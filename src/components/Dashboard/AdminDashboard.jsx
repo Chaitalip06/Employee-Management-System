@@ -8,6 +8,7 @@ import AddEmployee from './AddEmployee'
 import EmployeeManagement from './EmployeeManagement'
 import ManageTasks from './ManageTasks'
 import AttendanceManagement from './AttendanceManagement'
+import AdminLeaveRequests from './AdminLeaveRequests'
 
 const AdminDashboard = () => {
   const { user, logout } = useAuth()
@@ -90,7 +91,7 @@ const AdminDashboard = () => {
     <div className="flex min-h-screen bg-gray-100">
 
       {/* Sidebar */}
-      <aside className="flex w-64 flex-col bg-gray-900 p-6 text-white">
+      <aside className="flex w-64 shrink-0 flex-col bg-gray-900 p-6 text-white">
 
         {/* Logo */}
         <div className="mb-10">
@@ -343,17 +344,7 @@ const AdminDashboard = () => {
 
         {/* Leave Requests Page */}
         {activePage === 'Leave Requests' && (
-          <div className="rounded-2xl border border-gray-100 bg-white p-10 text-center shadow-sm">
-            <div className="text-5xl">🚧</div>
-
-            <h3 className="mt-5 text-2xl font-bold text-gray-800">
-              Leave Requests
-            </h3>
-
-            <p className="mt-3 text-gray-500">
-              This section will be available soon.
-            </p>
-          </div>
+          <AdminLeaveRequests />
         )}
 
         {/* Settings Page */}

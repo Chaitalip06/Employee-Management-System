@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import { useTasks } from '../../context/TaskContext'
 import { supabase } from '../../supabase/supabaseClient'
+import LeaveManagement from './LeaveManagement'
 
 const EmployeeDashboard = () => {
   const { user, logout } = useAuth()
@@ -19,6 +20,7 @@ const EmployeeDashboard = () => {
   const [attendanceBusy, setAttendanceBusy] = useState(false)
   const [attendanceError, setAttendanceError] = useState('')
 
+  // Sidebar menu
   const menuItems = [
     { name: 'Dashboard', icon: '🏠' },
     { name: 'My Tasks', icon: '📋' },
@@ -62,7 +64,7 @@ const EmployeeDashboard = () => {
   }
 
   const formatTime = (time) => {
-    if (!time) return '--'
+    if (!time || time === '--') return '--'
 
     const [hours, minutes] = time.split(':')
     const date = new Date()
@@ -292,12 +294,13 @@ const EmployeeDashboard = () => {
 
   const attendanceSummary = (
     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-6">
+
       <div className="bg-slate-50 rounded-xl p-4">
         <p className="text-sm text-slate-500">
           Check In
         </p>
         <p className="text-xl font-bold text-slate-800 mt-1">
-          {checkInTime === '--' ? '--' : formatTime(checkInTime)}
+          {formatTime(checkInTime)}
         </p>
       </div>
 
@@ -306,7 +309,7 @@ const EmployeeDashboard = () => {
           Check Out
         </p>
         <p className="text-xl font-bold text-slate-800 mt-1">
-          {checkOutTime === '--' ? '--' : formatTime(checkOutTime)}
+          {formatTime(checkOutTime)}
         </p>
       </div>
 
@@ -318,12 +321,14 @@ const EmployeeDashboard = () => {
           {calculateWorkingHours()}
         </p>
       </div>
+
     </div>
   )
 
   // ================= CONTENT =================
 
   const renderContent = () => {
+
     // ================= DASHBOARD =================
 
     if (activeMenu === 'Dashboard') {
@@ -333,8 +338,10 @@ const EmployeeDashboard = () => {
 
           <div className="bg-gradient-to-r from-blue-600 to-indigo-600
                           rounded-2xl p-6 md:p-8 text-white mb-8 shadow-lg">
+
             <div className="flex flex-col md:flex-row
                             md:items-center justify-between">
+
               <div>
                 <p className="text-blue-100 mb-2">
                   {new Date().toLocaleDateString('en-IN', {
@@ -346,7 +353,7 @@ const EmployeeDashboard = () => {
                 </p>
 
                 <h1 className="text-2xl md:text-3xl font-bold mb-2">
-                  Good Morning, {user?.name}! 👋
+                  Welcome back, {user?.name || 'Employee'}! 👋
                 </h1>
 
                 <p className="text-blue-100">
@@ -357,6 +364,7 @@ const EmployeeDashboard = () => {
               <div className="text-6xl mt-5 md:mt-0">
                 ☀️
               </div>
+
             </div>
           </div>
 
@@ -367,19 +375,23 @@ const EmployeeDashboard = () => {
 
             <div className="bg-white rounded-2xl p-5 shadow-sm
                             border border-slate-200 hover:shadow-md transition">
+
               <div className="flex items-center justify-between">
                 <div className="w-12 h-12 rounded-xl bg-blue-100
                                 flex items-center justify-center text-2xl">
                   📋
                 </div>
+
                 <span className="text-xs bg-blue-50 text-blue-600
                                  px-2 py-1 rounded-full">
                   {totalTasks} tasks
                 </span>
               </div>
+
               <p className="text-slate-500 text-sm mt-4">
                 Total Tasks
               </p>
+
               <h3 className="text-3xl font-bold text-slate-800 mt-1">
                 {totalTasks}
               </h3>
@@ -387,13 +399,16 @@ const EmployeeDashboard = () => {
 
             <div className="bg-white rounded-2xl p-5 shadow-sm
                             border border-slate-200 hover:shadow-md transition">
+
               <div className="w-12 h-12 rounded-xl bg-green-100
                               flex items-center justify-center text-2xl">
                 ✅
               </div>
+
               <p className="text-slate-500 text-sm mt-4">
                 Completed
               </p>
+
               <h3 className="text-3xl font-bold text-slate-800 mt-1">
                 {completedTasks}
               </h3>
@@ -401,13 +416,16 @@ const EmployeeDashboard = () => {
 
             <div className="bg-white rounded-2xl p-5 shadow-sm
                             border border-slate-200 hover:shadow-md transition">
+
               <div className="w-12 h-12 rounded-xl bg-orange-100
                               flex items-center justify-center text-2xl">
                 ⏳
               </div>
+
               <p className="text-slate-500 text-sm mt-4">
                 Pending
               </p>
+
               <h3 className="text-3xl font-bold text-slate-800 mt-1">
                 {pendingTasks}
               </h3>
@@ -415,32 +433,44 @@ const EmployeeDashboard = () => {
 
             <div className="bg-white rounded-2xl p-5 shadow-sm
                             border border-slate-200 hover:shadow-md transition">
+
               <div className="w-12 h-12 rounded-xl bg-purple-100
                               flex items-center justify-center text-2xl">
                 🕒
               </div>
+
               <p className="text-slate-500 text-sm mt-4">
                 Attendance
               </p>
+
               <h3 className="text-3xl font-bold text-slate-800 mt-1">
-                {attendanceId ? 'Present' : '--'}
+                {attendanceLoading
+                  ? '...'
+                  : attendanceId
+                  ? 'Present'
+                  : 'Not Marked'}
               </h3>
             </div>
+
           </div>
 
           {/* Tasks and Recent Activity */}
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
+            {/* My Tasks */}
+
             <div className="lg:col-span-2 bg-white rounded-2xl
                             border border-slate-200 shadow-sm">
 
               <div className="p-6 border-b border-slate-200
                               flex items-center justify-between">
+
                 <div>
                   <h2 className="text-lg font-bold text-slate-800">
                     My Tasks
                   </h2>
+
                   <p className="text-sm text-slate-500">
                     Your latest assigned tasks
                   </p>
@@ -452,9 +482,11 @@ const EmployeeDashboard = () => {
                 >
                   View All
                 </button>
+
               </div>
 
               <div className="divide-y divide-slate-100">
+
                 {tasks.length === 0 ? (
                   <div className="p-8 text-center text-slate-500">
                     No tasks available.
@@ -466,6 +498,7 @@ const EmployeeDashboard = () => {
                       className="p-5 flex items-center justify-between
                                  gap-4 hover:bg-slate-50 transition"
                     >
+
                       <div className="flex items-center gap-4">
                         <div className="w-10 h-10 rounded-xl bg-slate-100
                                         flex items-center justify-center">
@@ -476,6 +509,7 @@ const EmployeeDashboard = () => {
                           <h3 className="font-semibold text-slate-800">
                             {task.title}
                           </h3>
+
                           <p className="text-xs text-slate-500 mt-1">
                             Due: {task.deadline || task.dueDate || task.date || 'Not specified'}
                           </p>
@@ -483,6 +517,7 @@ const EmployeeDashboard = () => {
                       </div>
 
                       <div className="text-right">
+
                         <span className={`text-xs px-3 py-1 rounded-full
                           font-medium ${
                             task.status === 'Completed'
@@ -514,10 +549,12 @@ const EmployeeDashboard = () => {
                             Mark Completed
                           </button>
                         )}
+
                       </div>
                     </div>
                   ))
                 )}
+
               </div>
             </div>
 
@@ -525,25 +562,30 @@ const EmployeeDashboard = () => {
 
             <div className="bg-white rounded-2xl
                             border border-slate-200 shadow-sm">
+
               <div className="p-6 border-b border-slate-200">
                 <h2 className="text-lg font-bold text-slate-800">
                   Recent Activity
                 </h2>
+
                 <p className="text-sm text-slate-500">
                   Your latest activities
                 </p>
               </div>
 
               <div className="p-6">
+
                 <div className="flex gap-3 mb-6">
                   <div className="w-8 h-8 rounded-full bg-green-100
                                   flex items-center justify-center">
                     ✓
                   </div>
+
                   <div>
                     <p className="text-sm text-slate-700">
                       Dashboard loaded successfully
                     </p>
+
                     <p className="text-xs text-slate-400 mt-1">
                       Just now
                     </p>
@@ -555,10 +597,12 @@ const EmployeeDashboard = () => {
                                   flex items-center justify-center">
                     📋
                   </div>
+
                   <div>
                     <p className="text-sm text-slate-700">
                       {totalTasks} tasks assigned
                     </p>
+
                     <p className="text-xs text-slate-400 mt-1">
                       Today
                     </p>
@@ -570,19 +614,23 @@ const EmployeeDashboard = () => {
                                   flex items-center justify-center">
                     🕒
                   </div>
+
                   <div>
                     <p className="text-sm text-slate-700">
                       {attendanceId
                         ? `Checked in at ${formatTime(checkInTime)}`
                         : 'Attendance available'}
                     </p>
+
                     <p className="text-xs text-slate-400 mt-1">
                       Today
                     </p>
                   </div>
                 </div>
+
               </div>
             </div>
+
           </div>
 
           {/* Today's Attendance */}
@@ -592,10 +640,12 @@ const EmployeeDashboard = () => {
 
             <div className="flex flex-col sm:flex-row
                             sm:items-center justify-between gap-4">
+
               <div>
                 <h2 className="text-lg font-bold text-slate-800">
                   Today's Attendance
                 </h2>
+
                 <p className="text-sm text-slate-500 mt-1">
                   Track your working hours
                 </p>
@@ -606,6 +656,7 @@ const EmployeeDashboard = () => {
 
             {attendanceMessages}
             {attendanceSummary}
+
           </div>
         </>
       )
@@ -617,16 +668,19 @@ const EmployeeDashboard = () => {
       return (
         <div className="bg-white rounded-2xl border
                         border-slate-200 shadow-sm">
+
           <div className="p-6 border-b border-slate-200">
             <h2 className="text-xl font-bold text-slate-800">
               My Tasks 📋
             </h2>
+
             <p className="text-sm text-slate-500 mt-1">
               Manage all your assigned tasks
             </p>
           </div>
 
           <div className="p-6 space-y-4">
+
             {tasks.length === 0 ? (
               <p className="text-center text-slate-500 py-8">
                 No tasks available.
@@ -638,21 +692,26 @@ const EmployeeDashboard = () => {
                   className="border border-slate-200 rounded-xl
                              p-5 hover:shadow-md transition"
                 >
+
                   <div className="flex flex-col md:flex-row
                                   md:items-center justify-between gap-4">
+
                     <div>
                       <h3 className="font-bold text-slate-800">
                         {task.title}
                       </h3>
+
                       <p className="text-sm text-slate-500 mt-1">
                         {task.description}
                       </p>
+
                       <p className="text-xs text-slate-400 mt-2">
                         Due: {task.deadline || task.dueDate || task.date || 'Not specified'}
                       </p>
                     </div>
 
                     <div className="flex flex-col items-start md:items-end">
+
                       <span className={`text-xs px-3 py-1 rounded-full ${
                         task.status === 'Completed'
                           ? 'bg-green-100 text-green-700'
@@ -677,11 +736,13 @@ const EmployeeDashboard = () => {
                           Mark Completed
                         </button>
                       )}
+
                     </div>
                   </div>
                 </div>
               ))
             )}
+
           </div>
         </div>
       )
@@ -693,6 +754,7 @@ const EmployeeDashboard = () => {
       return (
         <div className="bg-white rounded-2xl
                         border border-slate-200 shadow-sm p-6">
+
           <h2 className="text-xl font-bold text-slate-800">
             Attendance 🕒
           </h2>
@@ -703,10 +765,12 @@ const EmployeeDashboard = () => {
 
           <div className="mt-6 flex flex-col sm:flex-row
                           sm:items-center justify-between gap-4">
+
             <div>
               <p className="text-sm text-slate-500">
                 Today's date
               </p>
+
               <p className="font-semibold text-slate-800">
                 {new Date().toLocaleDateString('en-IN', {
                   day: 'numeric',
@@ -717,6 +781,7 @@ const EmployeeDashboard = () => {
             </div>
 
             {attendanceButtons}
+
           </div>
 
           {attendanceMessages}
@@ -733,6 +798,7 @@ const EmployeeDashboard = () => {
                 : 'You have not checked in today.'}
             </p>
           </div>
+
         </div>
       )
     }
@@ -740,44 +806,7 @@ const EmployeeDashboard = () => {
     // ================= LEAVE =================
 
     if (activeMenu === 'Leave') {
-      return (
-        <div className="bg-white rounded-2xl
-                        border border-slate-200 shadow-sm p-6">
-          <h2 className="text-xl font-bold text-slate-800">
-            Leave Management 🌴
-          </h2>
-
-          <p className="text-sm text-slate-500 mt-1">
-            Manage your leave requests
-          </p>
-
-          <div className="grid grid-cols-1 md:grid-cols-3
-                          gap-5 mt-8">
-            <div className="bg-blue-50 p-5 rounded-xl">
-              <p className="text-sm text-slate-500">Total Leave</p>
-              <h3 className="text-3xl font-bold mt-2">20</h3>
-            </div>
-
-            <div className="bg-green-50 p-5 rounded-xl">
-              <p className="text-sm text-slate-500">Used</p>
-              <h3 className="text-3xl font-bold mt-2">5</h3>
-            </div>
-
-            <div className="bg-orange-50 p-5 rounded-xl">
-              <p className="text-sm text-slate-500">Remaining</p>
-              <h3 className="text-3xl font-bold mt-2">15</h3>
-            </div>
-          </div>
-
-          <button
-            onClick={() => alert('Leave request form will open here.')}
-            className="mt-8 bg-blue-600 text-white
-                       px-5 py-3 rounded-lg hover:bg-blue-700"
-          >
-            + Apply for Leave
-          </button>
-        </div>
-      )
+      return <LeaveManagement />
     }
 
     // ================= PROFILE =================
@@ -786,6 +815,7 @@ const EmployeeDashboard = () => {
       return (
         <div className="bg-white rounded-2xl
                         border border-slate-200 shadow-sm p-6">
+
           <h2 className="text-xl font-bold text-slate-800">
             My Profile 👤
           </h2>
@@ -796,10 +826,11 @@ const EmployeeDashboard = () => {
 
           <div className="mt-8 flex flex-col sm:flex-row
                           items-center gap-6">
+
             <div className="w-24 h-24 rounded-full bg-blue-600
                             text-white flex items-center justify-center
                             text-3xl font-bold">
-              {user?.name?.charAt(0)?.toUpperCase()}
+              {user?.name?.charAt(0)?.toUpperCase() || 'E'}
             </div>
 
             <div>
@@ -817,6 +848,7 @@ const EmployeeDashboard = () => {
                 {user?.role}
               </span>
             </div>
+
           </div>
         </div>
       )
@@ -838,20 +870,26 @@ const EmployeeDashboard = () => {
 
         <div className="h-20 flex items-center px-6
                         border-b border-slate-700">
+
           <div className="w-10 h-10 bg-blue-600 rounded-xl
                           flex items-center justify-center text-xl">
             EM
           </div>
 
           <div className="ml-3">
-            <h1 className="font-bold text-lg">EmployeeMS</h1>
+            <h1 className="font-bold text-lg">
+              EmployeeMS
+            </h1>
+
             <p className="text-xs text-slate-400">
               Employee Portal
             </p>
           </div>
+
         </div>
 
         <nav className="flex-1 px-4 py-6">
+
           <p className="text-xs uppercase text-slate-500
                         font-semibold px-3 mb-3">
             Menu
@@ -869,10 +907,16 @@ const EmployeeDashboard = () => {
                   : 'text-slate-300 hover:bg-slate-800'
               }`}
             >
-              <span className="text-lg">{item.icon}</span>
-              <span className="font-medium">{item.name}</span>
+              <span className="text-lg">
+                {item.icon}
+              </span>
+
+              <span className="font-medium">
+                {item.name}
+              </span>
             </button>
           ))}
+
         </nav>
 
         <div className="p-4 border-t border-slate-700">
@@ -886,6 +930,7 @@ const EmployeeDashboard = () => {
             <span>Logout</span>
           </button>
         </div>
+
       </aside>
 
       {/* MAIN CONTENT */}
@@ -897,6 +942,7 @@ const EmployeeDashboard = () => {
         <header className="bg-white border-b border-slate-200
                            h-20 flex items-center
                            justify-between px-6 md:px-8">
+
           <div>
             <h2 className="text-xl font-bold text-slate-800">
               {activeMenu}
@@ -908,34 +954,40 @@ const EmployeeDashboard = () => {
           </div>
 
           <div className="flex items-center gap-4">
+
             <button
               className="relative w-10 h-10 rounded-full
                          bg-slate-100 hover:bg-slate-200"
               aria-label="Notifications"
             >
               🔔
+
               <span className="absolute top-1 right-1
                                w-2.5 h-2.5 bg-red-500
                                rounded-full border-2 border-white" />
             </button>
 
             <div className="flex items-center gap-3">
+
               <div className="w-10 h-10 rounded-full bg-blue-600
                               text-white flex items-center
                               justify-center font-bold">
-                {user?.name?.charAt(0)?.toUpperCase()}
+                {user?.name?.charAt(0)?.toUpperCase() || 'E'}
               </div>
 
               <div className="hidden sm:block">
                 <p className="text-sm font-semibold text-slate-800">
                   {user?.name}
                 </p>
+
                 <p className="text-xs text-slate-500">
                   Employee
                 </p>
               </div>
+
             </div>
           </div>
+
         </header>
 
         {/* PAGE CONTENT */}
@@ -943,6 +995,7 @@ const EmployeeDashboard = () => {
         <div className="p-6 md:p-8">
           {renderContent()}
         </div>
+
       </main>
     </div>
   )
