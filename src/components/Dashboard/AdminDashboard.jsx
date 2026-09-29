@@ -9,6 +9,7 @@ import EmployeeManagement from './EmployeeManagement'
 import ManageTasks from './ManageTasks'
 import AttendanceManagement from './AttendanceManagement'
 import AdminLeaveRequests from './AdminLeaveRequests'
+import AdminSettings from './AdminSettings'
 
 const AdminDashboard = () => {
   const { user, logout } = useAuth()
@@ -349,17 +350,7 @@ const AdminDashboard = () => {
 
         {/* Settings Page */}
         {activePage === 'Settings' && (
-          <div className="rounded-2xl border border-gray-100 bg-white p-10 text-center shadow-sm">
-            <div className="text-5xl">⚙️</div>
-
-            <h3 className="mt-5 text-2xl font-bold text-gray-800">
-              Settings
-            </h3>
-
-            <p className="mt-3 text-gray-500">
-              This section will be available soon.
-            </p>
-          </div>
+          <AdminSettings />
         )}
 
       </main>
