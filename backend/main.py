@@ -1,17 +1,43 @@
 from fastapi import FastAPI
+from supabase import create_client, Client
+from dotenv import load_dotenv
+import os
 
+# Load .env file
+load_dotenv()
+
+# Get Supabase credentials
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+# Check credentials
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise ValueError("SUPABASE_URL or SUPABASE_KEY is missing in .env file")
+
+# Create Supabase client
+supabase: Client = create_client(
+    SUPABASE_URL,
+    SUPABASE_KEY
+)
+
+# Create FastAPI app
 app = FastAPI()
 
 
-# Home API
+# -----------------------------
+# HOME API
+# -----------------------------
 @app.get("/")
 def home():
     return {
+        "success": True,
         "message": "Employee Management System Backend is Running!"
     }
 
 
-# Test API
+# -----------------------------
+# TEST API
+# -----------------------------
 @app.get("/api/test")
 def test():
     return {
@@ -20,35 +46,56 @@ def test():
     }
 
 
-# Get Employees
+# -----------------------------
+# GET ALL EMPLOYEES
+# -----------------------------
 @app.get("/api/employees")
 def get_employees():
-    employees = [
-        {
-            "id": 1,
-            "name": "Chaitali",
-            "role": "Software Developer",
-            "department": "IT"
-        },
-        {
-            "id": 2,
-            "name": "Rahul",
-            "role": "Frontend Developer",
-            "department": "IT"
+
+    try:
+        response = (
+            supabase
+            .table("employees")
+            .select("*")
+            .execute()
+        )
+
+        return {
+            "success": True,
+            "employees": response.data
         }
-    ]
 
-    return {
-        "success": True,
-        "employees": employees
-    }
+    except Exception as e:
+
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 
-# Get Single Employee
+# -----------------------------
+# GET SINGLE EMPLOYEE
+# -----------------------------
 @app.get("/api/employees/{employee_id}")
-def get_employee(employee_id: int):
-    return {
-        "success": True,
-        "employee_id": employee_id,
-        "message": f"Employee {employee_id} found"
-    }
+def get_employee(employee_id: str):
+
+    try:
+        response = (
+            supabase
+            .table("employees")
+            .select("*")
+            .eq("id", employee_id)
+            .execute()
+        )
+
+        return {
+            "success": True,
+            "employee": response.data
+        }
+
+    except Exception as e:
+
+        return {
+            "success": False,
+            "error": str(e)
+        }
