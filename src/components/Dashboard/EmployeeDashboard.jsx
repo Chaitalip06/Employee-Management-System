@@ -7,9 +7,12 @@ import LeaveManagement from './LeaveManagement'
 
 const EmployeeDashboard = () => {
   const { user, logout } = useAuth()
-  const { tasks, completeTask } = useTasks()
+  const { tasks = [], completeTask } = useTasks()
 
   const [activeMenu, setActiveMenu] = useState('Dashboard')
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [taskSearch, setTaskSearch] = useState('')
+  const [taskFilter, setTaskFilter] = useState('All')
 
   // Attendance state
   const [checkedIn, setCheckedIn] = useState(false)
@@ -20,7 +23,6 @@ const EmployeeDashboard = () => {
   const [attendanceBusy, setAttendanceBusy] = useState(false)
   const [attendanceError, setAttendanceError] = useState('')
 
-  // Sidebar menu
   const menuItems = [
     { name: 'Dashboard', icon: '🏠' },
     { name: 'My Tasks', icon: '📋' },
@@ -29,23 +31,39 @@ const EmployeeDashboard = () => {
     { name: 'Profile', icon: '👤' },
   ]
 
-  // ================= TASK COUNTS =================
-
+  // Task statistics
   const totalTasks = tasks.length
 
   const completedTasks = tasks.filter(
     task => task.status === 'Completed'
   ).length
 
+  // Open Tasks includes Pending and In Progress
   const pendingTasks = tasks.filter(
-    task => task.status === 'Pending'
+    task => task.status !== 'Completed'
   ).length
 
-  // ================= ATTENDANCE HELPERS =================
+  const completionRate = totalTasks
+    ? Math.round((completedTasks / totalTasks) * 100)
+    : 0
 
+  // Task search and filtering
+  const filteredTasks = tasks.filter(task => {
+    const matchesSearch = `${task.title || ''} ${
+      task.description || ''
+    }`.toLowerCase().includes(taskSearch.toLowerCase())
+
+    const matchesFilter =
+      taskFilter === 'All' ||
+      (taskFilter === 'Open' && task.status !== 'Completed') ||
+      task.status === taskFilter
+
+    return matchesSearch && matchesFilter
+  })
+
+  // Attendance helpers
   const getTodayDate = () => {
     const now = new Date()
-
     const year = now.getFullYear()
     const month = String(now.getMonth() + 1).padStart(2, '0')
     const day = String(now.getDate()).padStart(2, '0')
@@ -59,56 +77,81 @@ const EmployeeDashboard = () => {
     return [
       String(now.getHours()).padStart(2, '0'),
       String(now.getMinutes()).padStart(2, '0'),
-      String(now.getSeconds()).padStart(2, '0')
+      String(now.getSeconds()).padStart(2, '0'),
     ].join(':')
   }
 
-  const formatTime = (time) => {
+  const formatTime = time => {
     if (!time || time === '--') return '--'
 
-    const [hours, minutes] = time.split(':')
+    const parts = time.split(':')
     const date = new Date()
 
-    date.setHours(Number(hours), Number(minutes), 0, 0)
+    date.setHours(
+      Number(parts[0]),
+      Number(parts[1]),
+      Number(parts[2] || 0),
+      0
+    )
 
     return date.toLocaleTimeString([], {
       hour: '2-digit',
-      minute: '2-digit'
+      minute: '2-digit',
     })
   }
 
   const calculateWorkingHours = () => {
-    if (!checkInTime || checkInTime === '--') {
-      return '--'
-    }
+    if (!checkInTime || checkInTime === '--') return '--'
 
-    if (!checkOutTime || checkOutTime === '--') {
-      return checkedIn ? 'In Progress' : '--'
-    }
-
-    const parseTime = (time) => {
-      const [hours, minutes] = time.split(':').map(Number)
-      return hours * 60 + minutes
+    const parseTime = time => {
+      const [hours, minutes, seconds = 0] = time.split(':').map(Number)
+      return hours * 3600 + minutes * 60 + seconds
     }
 
     const start = parseTime(checkInTime)
-    const end = parseTime(checkOutTime)
+
+    // Show elapsed working time while checked in
+    const end =
+      checkOutTime && checkOutTime !== '--'
+        ? parseTime(checkOutTime)
+        : checkedIn
+          ? (() => {
+              const now = new Date()
+              return (
+                now.getHours() * 3600 +
+                now.getMinutes() * 60 +
+                now.getSeconds()
+              )
+            })()
+          : null
+
+    if (end === null) return '--'
 
     let difference = end - start
 
-    // Handle overnight shifts
-    if (difference < 0) {
-      difference += 24 * 60
-    }
+    if (difference < 0) difference += 24 * 3600
 
-    const hours = Math.floor(difference / 60)
-    const minutes = difference % 60
+    const hours = Math.floor(difference / 3600)
+    const minutes = Math.floor((difference % 3600) / 60)
 
     return `${hours}h ${minutes}m`
   }
 
-  // ================= LOAD ATTENDANCE =================
+  const [workingHours, setWorkingHours] = useState('--')
 
+  useEffect(() => {
+    const updateWorkingHours = () => {
+      setWorkingHours(calculateWorkingHours())
+    }
+
+    updateWorkingHours()
+
+    const timer = setInterval(updateWorkingHours, 60000)
+
+    return () => clearInterval(timer)
+  }, [checkInTime, checkOutTime, checkedIn])
+
+  // Load today's attendance from Supabase
   const loadAttendance = async () => {
     if (!user?.id) {
       setAttendanceLoading(false)
@@ -118,47 +161,43 @@ const EmployeeDashboard = () => {
     setAttendanceLoading(true)
     setAttendanceError('')
 
-    const { data, error } = await supabase
-      .from('attendance')
-      .select('id, check_in, check_out, status')
-      .eq('employee_id', user.id)
-      .eq('attendance_date', getTodayDate())
-      .maybeSingle()
+    try {
+      const { data, error } = await supabase
+        .from('attendance')
+        .select('id, check_in, check_out, status')
+        .eq('employee_id', user.id)
+        .eq('attendance_date', getTodayDate())
+        .maybeSingle()
 
-    if (error) {
+      if (error) throw error
+
+      if (data) {
+        setAttendanceId(data.id)
+        setCheckInTime(data.check_in || '--')
+        setCheckOutTime(data.check_out || '--')
+        setCheckedIn(Boolean(data.check_in) && !data.check_out)
+      } else {
+        setAttendanceId(null)
+        setCheckInTime('--')
+        setCheckOutTime('--')
+        setCheckedIn(false)
+      }
+    } catch (error) {
       console.error('Attendance loading error:', error)
-      setAttendanceError(error.message)
+      setAttendanceError(error.message || 'Unable to load attendance.')
+    } finally {
       setAttendanceLoading(false)
-      return
     }
-
-    if (data) {
-      setAttendanceId(data.id)
-      setCheckInTime(data.check_in || '--')
-      setCheckOutTime(data.check_out || '--')
-
-      setCheckedIn(
-        Boolean(data.check_in) && !data.check_out
-      )
-    } else {
-      setAttendanceId(null)
-      setCheckInTime('--')
-      setCheckOutTime('--')
-      setCheckedIn(false)
-    }
-
-    setAttendanceLoading(false)
   }
 
   useEffect(() => {
     loadAttendance()
   }, [user?.id])
 
-  // ================= CHECK IN =================
-
+  // Check in
   const handleCheckIn = async () => {
     if (!user?.id) {
-      alert('Please login first!')
+      alert('Please log in first.')
       return
     }
 
@@ -170,89 +209,115 @@ const EmployeeDashboard = () => {
     setAttendanceBusy(true)
     setAttendanceError('')
 
-    const currentTime = getCurrentTime()
+    try {
+      const currentTime = getCurrentTime()
 
-    const { data, error } = await supabase
-      .from('attendance')
-      .insert({
-        employee_id: user.id,
-        attendance_date: getTodayDate(),
-        check_in: currentTime,
-        status: 'Present'
-      })
-      .select('id, check_in, check_out, status')
-      .single()
+      const { data, error } = await supabase
+        .from('attendance')
+        .insert({
+          employee_id: user.id,
+          attendance_date: getTodayDate(),
+          check_in: currentTime,
+          status: 'Present',
+        })
+        .select('id, check_in, check_out, status')
+        .single()
 
-    if (error) {
-      console.error('Check In error:', error)
-      setAttendanceError(error.message)
-      alert(`Check In failed: ${error.message}`)
-    } else {
+      if (error) throw error
+
       setAttendanceId(data.id)
-      setCheckInTime(data.check_in)
+      setCheckInTime(data.check_in || currentTime)
       setCheckOutTime(data.check_out || '--')
       setCheckedIn(true)
 
       alert('Check In successful! Attendance saved.')
+    } catch (error) {
+      console.error('Check In error:', error)
+      setAttendanceError(error.message || 'Check In failed.')
+      alert(`Check In failed: ${error.message}`)
+    } finally {
+      setAttendanceBusy(false)
     }
-
-    setAttendanceBusy(false)
   }
 
-  // ================= CHECK OUT =================
-
+  // Check out
   const handleCheckOut = async () => {
     if (!attendanceId || !checkedIn) {
-      alert('Please Check In first!')
+      alert('Please Check In first.')
       return
     }
 
     setAttendanceBusy(true)
     setAttendanceError('')
 
-    const currentTime = getCurrentTime()
+    try {
+      const currentTime = getCurrentTime()
 
-    const { data, error } = await supabase
-      .from('attendance')
-      .update({
-        check_out: currentTime
-      })
-      .eq('id', attendanceId)
-      .select('id, check_in, check_out, status')
-      .single()
+      const { data, error } = await supabase
+        .from('attendance')
+        .update({ check_out: currentTime })
+        .eq('id', attendanceId)
+        .eq('employee_id', user.id)
+        .select('id, check_in, check_out, status')
+        .single()
 
-    if (error) {
-      console.error('Check Out error:', error)
-      setAttendanceError(error.message)
-      alert(`Check Out failed: ${error.message}`)
-    } else {
+      if (error) throw error
+
       setAttendanceId(data.id)
       setCheckInTime(data.check_in || '--')
-      setCheckOutTime(data.check_out || '--')
+      setCheckOutTime(data.check_out || currentTime)
       setCheckedIn(false)
 
       alert('Check Out successful! Attendance updated.')
+    } catch (error) {
+      console.error('Check Out error:', error)
+      setAttendanceError(error.message || 'Check Out failed.')
+      alert(`Check Out failed: ${error.message}`)
+    } finally {
+      setAttendanceBusy(false)
     }
-
-    setAttendanceBusy(false)
   }
 
-  // ================= ATTENDANCE BUTTONS =================
+  const openMenu = name => {
+    setActiveMenu(name)
+    setMobileMenuOpen(false)
+  }
 
+  const statusClass = status => {
+    if (status === 'Completed') {
+      return 'bg-green-100 text-green-700'
+    }
+
+    if (status === 'In Progress') {
+      return 'bg-blue-100 text-blue-700'
+    }
+
+    return 'bg-orange-100 text-orange-700'
+  }
+
+  const priorityClass = priority => {
+    if (priority === 'High') return 'text-red-600'
+    if (priority === 'Medium') return 'text-orange-600'
+    return 'text-green-600'
+  }
+
+  const getDueDate = task =>
+    task.deadline || task.dueDate || task.date || 'Not specified'
+
+  // Attendance controls
   const attendanceButtons = (
     <div className="flex flex-wrap gap-3">
       <button
         onClick={handleCheckIn}
         disabled={
           checkedIn ||
+          Boolean(attendanceId) ||
           attendanceBusy ||
-          attendanceLoading ||
-          Boolean(attendanceId)
+          attendanceLoading
         }
-        className="px-5 py-2.5 bg-green-600
-                   disabled:bg-slate-300 text-white
-                   rounded-lg font-medium hover:bg-green-700
-                   disabled:cursor-not-allowed transition"
+        className="rounded-xl bg-green-600 px-5 py-3 font-semibold text-white
+                   transition hover:bg-green-700 disabled:cursor-not-allowed
+                   disabled:bg-slate-300"
       >
         {attendanceBusy ? 'Saving...' : '✓ Check In'}
       </button>
@@ -264,10 +329,9 @@ const EmployeeDashboard = () => {
           attendanceBusy ||
           attendanceLoading
         }
-        className="px-5 py-2.5 bg-red-500
-                   disabled:bg-slate-300 text-white
-                   rounded-lg font-medium hover:bg-red-600
-                   disabled:cursor-not-allowed transition"
+        className="rounded-xl bg-red-500 px-5 py-3 font-semibold text-white
+                   transition hover:bg-red-600 disabled:cursor-not-allowed
+                   disabled:bg-slate-300"
       >
         {attendanceBusy ? 'Saving...' : 'Check Out'}
       </button>
@@ -277,725 +341,630 @@ const EmployeeDashboard = () => {
   const attendanceMessages = (
     <>
       {attendanceLoading && (
-        <p className="text-sm text-blue-600 mt-3">
+        <p className="mt-3 text-sm text-blue-600">
           Loading attendance...
         </p>
       )}
 
       {attendanceError && (
-        <p className="text-sm text-red-600 mt-3 break-words">
+        <div
+          role="alert"
+          className="mt-4 break-words rounded-xl bg-red-50 p-4 text-sm text-red-700"
+        >
           {attendanceError}
-        </p>
+          <button
+            onClick={loadAttendance}
+            className="ml-2 font-semibold underline"
+          >
+            Try again
+          </button>
+        </div>
       )}
     </>
   )
 
-  // ================= ATTENDANCE SUMMARY =================
-
   const attendanceSummary = (
-    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-6">
-
-      <div className="bg-slate-50 rounded-xl p-4">
-        <p className="text-sm text-slate-500">
-          Check In
-        </p>
-        <p className="text-xl font-bold text-slate-800 mt-1">
+    <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="rounded-xl bg-slate-50 p-5">
+        <p className="text-sm text-slate-500">Check In</p>
+        <p className="mt-2 text-2xl font-bold text-slate-800">
           {formatTime(checkInTime)}
         </p>
       </div>
 
-      <div className="bg-slate-50 rounded-xl p-4">
-        <p className="text-sm text-slate-500">
-          Check Out
-        </p>
-        <p className="text-xl font-bold text-slate-800 mt-1">
+      <div className="rounded-xl bg-slate-50 p-5">
+        <p className="text-sm text-slate-500">Check Out</p>
+        <p className="mt-2 text-2xl font-bold text-slate-800">
           {formatTime(checkOutTime)}
         </p>
       </div>
 
-      <div className="bg-slate-50 rounded-xl p-4">
-        <p className="text-sm text-slate-500">
-          Working Hours
-        </p>
-        <p className="text-xl font-bold text-blue-600 mt-1">
-          {calculateWorkingHours()}
+      <div className="rounded-xl bg-slate-50 p-5">
+        <p className="text-sm text-slate-500">Working Hours</p>
+        <p className="mt-2 text-2xl font-bold text-blue-600">
+          {workingHours}
         </p>
       </div>
-
     </div>
   )
 
-  // ================= CONTENT =================
+  // Reusable task card
+  const renderTask = task => (
+    <article
+      key={task.id}
+      className="flex flex-col gap-4 p-5 transition hover:bg-slate-50 sm:flex-row
+                 sm:items-center sm:justify-between"
+    >
+      <div className="flex min-w-0 items-start gap-4">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center
+                        rounded-xl bg-slate-100 text-xl">
+          📌
+        </div>
 
+        <div className="min-w-0">
+          <h3 className="break-words font-semibold text-slate-800">
+            {task.title || 'Untitled Task'}
+          </h3>
+
+          {task.description && (
+            <p className="mt-1 break-words text-sm text-slate-500">
+              {task.description}
+            </p>
+          )}
+
+          <p className="mt-2 text-xs text-slate-500">
+            Due: {getDueDate(task)}
+          </p>
+        </div>
+      </div>
+
+      <div className="flex shrink-0 flex-wrap items-center gap-2 sm:flex-col sm:items-end">
+        <span
+          className={`rounded-full px-3 py-1 text-xs font-semibold ${statusClass(task.status)}`}
+        >
+          {task.status || 'Pending'}
+        </span>
+
+        <span className={`text-xs font-medium ${priorityClass(task.priority)}`}>
+          {task.priority || 'Normal'} Priority
+        </span>
+
+        {task.status !== 'Completed' && (
+          <button
+            onClick={() => completeTask(task.id)}
+            className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold
+                       text-white transition hover:bg-blue-700"
+          >
+            Mark Completed
+          </button>
+        )}
+      </div>
+    </article>
+  )
+
+  // Page content
   const renderContent = () => {
-
-    // ================= DASHBOARD =================
-
     if (activeMenu === 'Dashboard') {
       return (
         <>
-          {/* Welcome Banner */}
-
-          <div className="bg-gradient-to-r from-blue-600 to-indigo-600
-                          rounded-2xl p-6 md:p-8 text-white mb-8 shadow-lg">
-
-            <div className="flex flex-col md:flex-row
-                            md:items-center justify-between">
-
+          {/* Welcome banner */}
+          <section className="mb-8 rounded-2xl bg-gradient-to-r from-blue-600
+                              to-indigo-600 p-6 text-white shadow-lg md:p-8">
+            <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-center">
               <div>
-                <p className="text-blue-100 mb-2">
+                <p className="mb-2 text-sm text-blue-100">
                   {new Date().toLocaleDateString('en-IN', {
                     weekday: 'long',
                     year: 'numeric',
                     month: 'long',
-                    day: 'numeric'
+                    day: 'numeric',
                   })}
                 </p>
 
-                <h1 className="text-2xl md:text-3xl font-bold mb-2">
+                <h1 className="text-2xl font-bold md:text-3xl">
                   Welcome back, {user?.name || 'Employee'}! 👋
                 </h1>
 
-                <p className="text-blue-100">
+                <p className="mt-2 text-blue-100">
                   Here's what's happening with your work today.
                 </p>
               </div>
 
-              <div className="text-6xl mt-5 md:mt-0">
+              <div className="hidden text-6xl sm:block" aria-hidden="true">
                 ☀️
               </div>
-
             </div>
-          </div>
+          </section>
 
-          {/* Stat Cards */}
-
-          <div className="grid grid-cols-1 sm:grid-cols-2
-                          lg:grid-cols-4 gap-5 mb-8">
-
-            <div className="bg-white rounded-2xl p-5 shadow-sm
-                            border border-slate-200 hover:shadow-md transition">
-
-              <div className="flex items-center justify-between">
-                <div className="w-12 h-12 rounded-xl bg-blue-100
-                                flex items-center justify-center text-2xl">
-                  📋
-                </div>
-
-                <span className="text-xs bg-blue-50 text-blue-600
-                                 px-2 py-1 rounded-full">
-                  {totalTasks} tasks
-                </span>
-              </div>
-
-              <p className="text-slate-500 text-sm mt-4">
-                Total Tasks
-              </p>
-
-              <h3 className="text-3xl font-bold text-slate-800 mt-1">
-                {totalTasks}
-              </h3>
-            </div>
-
-            <div className="bg-white rounded-2xl p-5 shadow-sm
-                            border border-slate-200 hover:shadow-md transition">
-
-              <div className="w-12 h-12 rounded-xl bg-green-100
-                              flex items-center justify-center text-2xl">
-                ✅
-              </div>
-
-              <p className="text-slate-500 text-sm mt-4">
-                Completed
-              </p>
-
-              <h3 className="text-3xl font-bold text-slate-800 mt-1">
-                {completedTasks}
-              </h3>
-            </div>
-
-            <div className="bg-white rounded-2xl p-5 shadow-sm
-                            border border-slate-200 hover:shadow-md transition">
-
-              <div className="w-12 h-12 rounded-xl bg-orange-100
-                              flex items-center justify-center text-2xl">
-                ⏳
-              </div>
-
-              <p className="text-slate-500 text-sm mt-4">
-                Pending
-              </p>
-
-              <h3 className="text-3xl font-bold text-slate-800 mt-1">
-                {pendingTasks}
-              </h3>
-            </div>
-
-            <div className="bg-white rounded-2xl p-5 shadow-sm
-                            border border-slate-200 hover:shadow-md transition">
-
-              <div className="w-12 h-12 rounded-xl bg-purple-100
-                              flex items-center justify-center text-2xl">
-                🕒
-              </div>
-
-              <p className="text-slate-500 text-sm mt-4">
-                Attendance
-              </p>
-
-              <h3 className="text-3xl font-bold text-slate-800 mt-1">
-                {attendanceLoading
+          {/* Statistics */}
+          <section className="mb-8 grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
+            {[
+              {
+                label: 'Total Tasks',
+                value: totalTasks,
+                icon: '📋',
+                color: 'bg-blue-100',
+                detail: 'Assigned to you',
+              },
+              {
+                label: 'Completed',
+                value: completedTasks,
+                icon: '✅',
+                color: 'bg-green-100',
+                detail: `${completionRate}% completion rate`,
+              },
+              {
+                label: 'Open Tasks',
+                value: pendingTasks,
+                icon: '⏳',
+                color: 'bg-orange-100',
+                detail: 'Still to be completed',
+              },
+              {
+                label: 'Attendance',
+                value: attendanceLoading
                   ? '...'
                   : attendanceId
-                  ? 'Present'
-                  : 'Not Marked'}
-              </h3>
+                    ? checkedIn
+                      ? 'Checked In'
+                      : 'Present'
+                    : 'Not Marked',
+                icon: '🕒',
+                color: 'bg-purple-100',
+                detail: "Today's attendance",
+              },
+            ].map(stat => (
+              <div
+                key={stat.label}
+                className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm
+                           transition hover:-translate-y-1 hover:shadow-md"
+              >
+                <div className="flex items-center justify-between">
+                  <div className={`flex h-12 w-12 items-center justify-center
+                                   rounded-xl text-2xl ${stat.color}`}>
+                    {stat.icon}
+                  </div>
+                </div>
+
+                <p className="mt-5 text-sm text-slate-500">{stat.label}</p>
+
+                <h3 className="mt-1 break-words text-2xl font-bold text-slate-800 sm:text-3xl">
+                  {stat.value}
+                </h3>
+
+                <p className="mt-2 text-xs text-slate-500">{stat.detail}</p>
+              </div>
+            ))}
+          </section>
+
+          {/* Progress */}
+          <section className="mb-8 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h2 className="font-bold text-slate-800">Task Progress</h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Your overall completion
+                </p>
+              </div>
+              <span className="text-xl font-bold text-blue-600">
+                {completionRate}%
+              </span>
             </div>
 
-          </div>
+            <div
+              className="mt-4 h-3 overflow-hidden rounded-full bg-slate-100"
+              role="progressbar"
+              aria-valuenow={completionRate}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-label="Task completion"
+            >
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-blue-500 to-indigo-600
+                           transition-all duration-500"
+                style={{ width: `${completionRate}%` }}
+              />
+            </div>
+          </section>
 
-          {/* Tasks and Recent Activity */}
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-
-            {/* My Tasks */}
-
-            <div className="lg:col-span-2 bg-white rounded-2xl
-                            border border-slate-200 shadow-sm">
-
-              <div className="p-6 border-b border-slate-200
-                              flex items-center justify-between">
-
+          {/* Tasks and activity */}
+          <section className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+            <div className="overflow-hidden rounded-2xl border border-slate-200
+                            bg-white shadow-sm xl:col-span-2">
+              <div className="flex items-center justify-between gap-4 border-b
+                              border-slate-200 p-6">
                 <div>
-                  <h2 className="text-lg font-bold text-slate-800">
-                    My Tasks
-                  </h2>
-
-                  <p className="text-sm text-slate-500">
+                  <h2 className="text-lg font-bold text-slate-800">My Tasks</h2>
+                  <p className="mt-1 text-sm text-slate-500">
                     Your latest assigned tasks
                   </p>
                 </div>
 
                 <button
-                  onClick={() => setActiveMenu('My Tasks')}
-                  className="text-sm text-blue-600 font-medium hover:underline"
+                  onClick={() => openMenu('My Tasks')}
+                  className="shrink-0 text-sm font-semibold text-blue-600 hover:underline"
                 >
-                  View All
+                  View All →
                 </button>
-
               </div>
 
               <div className="divide-y divide-slate-100">
-
                 {tasks.length === 0 ? (
-                  <div className="p-8 text-center text-slate-500">
-                    No tasks available.
+                  <div className="p-8 text-center">
+                    <div className="text-4xl">📋</div>
+                    <p className="mt-3 font-medium text-slate-700">No tasks yet</p>
+                    <p className="mt-1 text-sm text-slate-500">
+                      Your assigned tasks will appear here.
+                    </p>
                   </div>
                 ) : (
-                  tasks.slice(0, 5).map(task => (
-                    <div
-                      key={task.id}
-                      className="p-5 flex items-center justify-between
-                                 gap-4 hover:bg-slate-50 transition"
-                    >
-
-                      <div className="flex items-center gap-4">
-                        <div className="w-10 h-10 rounded-xl bg-slate-100
-                                        flex items-center justify-center">
-                          📌
-                        </div>
-
-                        <div>
-                          <h3 className="font-semibold text-slate-800">
-                            {task.title}
-                          </h3>
-
-                          <p className="text-xs text-slate-500 mt-1">
-                            Due: {task.deadline || task.dueDate || task.date || 'Not specified'}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="text-right">
-
-                        <span className={`text-xs px-3 py-1 rounded-full
-                          font-medium ${
-                            task.status === 'Completed'
-                              ? 'bg-green-100 text-green-700'
-                              : task.status === 'In Progress'
-                              ? 'bg-blue-100 text-blue-700'
-                              : 'bg-orange-100 text-orange-700'
-                          }`}>
-                          {task.status}
-                        </span>
-
-                        <p className={`text-xs mt-2 ${
-                          task.priority === 'High'
-                            ? 'text-red-500'
-                            : task.priority === 'Medium'
-                            ? 'text-orange-500'
-                            : 'text-green-500'
-                        }`}>
-                          {task.priority || 'Normal'} Priority
-                        </p>
-
-                        {task.status !== 'Completed' && (
-                          <button
-                            onClick={() => completeTask(task.id)}
-                            className="mt-2 text-xs bg-blue-600
-                                       text-white px-3 py-1.5 rounded-lg
-                                       hover:bg-blue-700"
-                          >
-                            Mark Completed
-                          </button>
-                        )}
-
-                      </div>
-                    </div>
-                  ))
+                  tasks.slice(0, 5).map(renderTask)
                 )}
-
               </div>
             </div>
 
-            {/* Recent Activity */}
-
-            <div className="bg-white rounded-2xl
-                            border border-slate-200 shadow-sm">
-
-              <div className="p-6 border-b border-slate-200">
-                <h2 className="text-lg font-bold text-slate-800">
-                  Recent Activity
-                </h2>
-
-                <p className="text-sm text-slate-500">
-                  Your latest activities
+            <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <div className="border-b border-slate-200 p-6">
+                <h2 className="text-lg font-bold text-slate-800">Work Summary</h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Your current overview
                 </p>
               </div>
 
-              <div className="p-6">
-
-                <div className="flex gap-3 mb-6">
-                  <div className="w-8 h-8 rounded-full bg-green-100
-                                  flex items-center justify-center">
-                    ✓
-                  </div>
-
+              <div className="space-y-5 p-6">
+                <div className="flex items-start gap-3">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center
+                                   rounded-full bg-blue-100">📋</span>
                   <div>
-                    <p className="text-sm text-slate-700">
-                      Dashboard loaded successfully
+                    <p className="text-sm font-medium text-slate-700">
+                      {totalTasks} total tasks assigned
                     </p>
-
-                    <p className="text-xs text-slate-400 mt-1">
-                      Just now
+                    <p className="mt-1 text-xs text-slate-400">
+                      {pendingTasks} open · {completedTasks} completed
                     </p>
                   </div>
                 </div>
 
-                <div className="flex gap-3 mb-6">
-                  <div className="w-8 h-8 rounded-full bg-blue-100
-                                  flex items-center justify-center">
-                    📋
-                  </div>
-
+                <div className="flex items-start gap-3">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center
+                                   rounded-full bg-green-100">✓</span>
                   <div>
-                    <p className="text-sm text-slate-700">
-                      {totalTasks} tasks assigned
+                    <p className="text-sm font-medium text-slate-700">
+                      {completionRate}% task completion
                     </p>
-
-                    <p className="text-xs text-slate-400 mt-1">
-                      Today
+                    <p className="mt-1 text-xs text-slate-400">
+                      Based on your current task list
                     </p>
                   </div>
                 </div>
 
-                <div className="flex gap-3">
-                  <div className="w-8 h-8 rounded-full bg-purple-100
-                                  flex items-center justify-center">
-                    🕒
-                  </div>
-
+                <div className="flex items-start gap-3">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center
+                                   rounded-full bg-purple-100">🕒</span>
                   <div>
-                    <p className="text-sm text-slate-700">
+                    <p className="text-sm font-medium text-slate-700">
+                      {attendanceLoading
+                        ? 'Loading attendance...'
+                        : checkedIn
+                          ? 'You are checked in'
+                          : attendanceId
+                            ? 'Attendance recorded'
+                            : 'Attendance not marked'}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-400">
                       {attendanceId
-                        ? `Checked in at ${formatTime(checkInTime)}`
-                        : 'Attendance available'}
-                    </p>
-
-                    <p className="text-xs text-slate-400 mt-1">
-                      Today
+                        ? `Check in: ${formatTime(checkInTime)}`
+                        : 'Remember to mark attendance'}
                     </p>
                   </div>
                 </div>
 
+                <button
+                  onClick={() => openMenu('Attendance')}
+                  className="w-full rounded-xl border border-blue-200 px-4 py-3
+                             text-sm font-semibold text-blue-600 transition hover:bg-blue-50"
+                >
+                  Go to Attendance →
+                </button>
               </div>
             </div>
+          </section>
 
-          </div>
-
-          {/* Today's Attendance */}
-
-          <div className="mt-6 bg-white rounded-2xl
-                          border border-slate-200 shadow-sm p-6">
-
-            <div className="flex flex-col sm:flex-row
-                            sm:items-center justify-between gap-4">
-
+          {/* Attendance panel */}
+          <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
               <div>
                 <h2 className="text-lg font-bold text-slate-800">
                   Today's Attendance
                 </h2>
-
-                <p className="text-sm text-slate-500 mt-1">
+                <p className="mt-1 text-sm text-slate-500">
                   Track your working hours
                 </p>
               </div>
-
               {attendanceButtons}
             </div>
 
             {attendanceMessages}
             {attendanceSummary}
-
-          </div>
+          </section>
         </>
       )
     }
 
-    // ================= MY TASKS =================
-
     if (activeMenu === 'My Tasks') {
       return (
-        <div className="bg-white rounded-2xl border
-                        border-slate-200 shadow-sm">
-
-          <div className="p-6 border-b border-slate-200">
-            <h2 className="text-xl font-bold text-slate-800">
-              My Tasks 📋
-            </h2>
-
-            <p className="text-sm text-slate-500 mt-1">
-              Manage all your assigned tasks
+        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-200 p-6">
+            <h2 className="text-xl font-bold text-slate-800">My Tasks 📋</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Search and manage your assigned tasks
             </p>
+
+            <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <input
+                type="search"
+                value={taskSearch}
+                onChange={event => setTaskSearch(event.target.value)}
+                placeholder="Search tasks..."
+                aria-label="Search tasks"
+                className="w-full rounded-xl border border-slate-200 px-4 py-3
+                           outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              />
+
+              <select
+                value={taskFilter}
+                onChange={event => setTaskFilter(event.target.value)}
+                aria-label="Filter tasks"
+                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3
+                           outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              >
+                <option value="All">All tasks</option>
+                <option value="Open">Open tasks</option>
+                <option value="Pending">Pending</option>
+                <option value="In Progress">In Progress</option>
+                <option value="Completed">Completed</option>
+              </select>
+            </div>
           </div>
 
-          <div className="p-6 space-y-4">
-
-            {tasks.length === 0 ? (
-              <p className="text-center text-slate-500 py-8">
-                No tasks available.
-              </p>
-            ) : (
-              tasks.map(task => (
-                <div
-                  key={task.id}
-                  className="border border-slate-200 rounded-xl
-                             p-5 hover:shadow-md transition"
+          <div className="divide-y divide-slate-100">
+            {filteredTasks.length === 0 ? (
+              <div className="p-10 text-center">
+                <div className="text-4xl">🔎</div>
+                <p className="mt-3 font-semibold text-slate-700">
+                  No matching tasks
+                </p>
+                <p className="mt-1 text-sm text-slate-500">
+                  Try a different search or filter.
+                </p>
+                <button
+                  onClick={() => {
+                    setTaskSearch('')
+                    setTaskFilter('All')
+                  }}
+                  className="mt-4 text-sm font-semibold text-blue-600 hover:underline"
                 >
-
-                  <div className="flex flex-col md:flex-row
-                                  md:items-center justify-between gap-4">
-
-                    <div>
-                      <h3 className="font-bold text-slate-800">
-                        {task.title}
-                      </h3>
-
-                      <p className="text-sm text-slate-500 mt-1">
-                        {task.description}
-                      </p>
-
-                      <p className="text-xs text-slate-400 mt-2">
-                        Due: {task.deadline || task.dueDate || task.date || 'Not specified'}
-                      </p>
-                    </div>
-
-                    <div className="flex flex-col items-start md:items-end">
-
-                      <span className={`text-xs px-3 py-1 rounded-full ${
-                        task.status === 'Completed'
-                          ? 'bg-green-100 text-green-700'
-                          : task.status === 'In Progress'
-                          ? 'bg-blue-100 text-blue-700'
-                          : 'bg-orange-100 text-orange-700'
-                      }`}>
-                        {task.status}
-                      </span>
-
-                      <span className="text-xs text-slate-500 mt-2">
-                        {task.priority || 'Normal'} Priority
-                      </span>
-
-                      {task.status !== 'Completed' && (
-                        <button
-                          onClick={() => completeTask(task.id)}
-                          className="mt-3 bg-blue-600 text-white
-                                     px-4 py-2 rounded-lg text-sm
-                                     hover:bg-blue-700"
-                        >
-                          Mark Completed
-                        </button>
-                      )}
-
-                    </div>
-                  </div>
-                </div>
-              ))
+                  Clear filters
+                </button>
+              </div>
+            ) : (
+              filteredTasks.map(renderTask)
             )}
-
           </div>
-        </div>
+        </section>
       )
     }
 
-    // ================= ATTENDANCE =================
-
     if (activeMenu === 'Attendance') {
       return (
-        <div className="bg-white rounded-2xl
-                        border border-slate-200 shadow-sm p-6">
-
-          <h2 className="text-xl font-bold text-slate-800">
-            Attendance 🕒
-          </h2>
-
-          <p className="text-sm text-slate-500 mt-1">
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="text-xl font-bold text-slate-800">Attendance 🕒</h2>
+          <p className="mt-1 text-sm text-slate-500">
             Manage your daily attendance
           </p>
 
-          <div className="mt-6 flex flex-col sm:flex-row
-                          sm:items-center justify-between gap-4">
-
+          <div className="mt-6 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
             <div>
-              <p className="text-sm text-slate-500">
-                Today's date
-              </p>
-
-              <p className="font-semibold text-slate-800">
+              <p className="text-sm text-slate-500">Today's date</p>
+              <p className="mt-1 font-semibold text-slate-800">
                 {new Date().toLocaleDateString('en-IN', {
                   day: 'numeric',
                   month: 'long',
-                  year: 'numeric'
+                  year: 'numeric',
                 })}
               </p>
+              <p className="mt-2 text-sm text-slate-500">
+                {checkedIn
+                  ? 'You are currently checked in.'
+                  : attendanceId
+                    ? 'Your attendance is recorded for today.'
+                    : 'You have not checked in today.'}
+              </p>
             </div>
-
             {attendanceButtons}
-
           </div>
 
           {attendanceMessages}
           {attendanceSummary}
-
-          <div className="mt-6 bg-blue-50 rounded-xl p-4">
-            <p className="text-sm text-blue-800">
-              {attendanceLoading
-                ? 'Please wait while attendance is loading.'
-                : checkedIn
-                ? 'You are currently checked in. Please check out when your work is finished.'
-                : attendanceId
-                ? 'Your attendance for today is complete.'
-                : 'You have not checked in today.'}
-            </p>
-          </div>
-
-        </div>
+        </section>
       )
     }
-
-    // ================= LEAVE =================
 
     if (activeMenu === 'Leave') {
       return <LeaveManagement />
     }
 
-    // ================= PROFILE =================
-
     if (activeMenu === 'Profile') {
       return (
-        <div className="bg-white rounded-2xl
-                        border border-slate-200 shadow-sm p-6">
-
-          <h2 className="text-xl font-bold text-slate-800">
-            My Profile 👤
-          </h2>
-
-          <p className="text-sm text-slate-500 mt-1">
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="text-xl font-bold text-slate-800">My Profile 👤</h2>
+          <p className="mt-1 text-sm text-slate-500">
             Your account information
           </p>
 
-          <div className="mt-8 flex flex-col sm:flex-row
-                          items-center gap-6">
-
-            <div className="w-24 h-24 rounded-full bg-blue-600
-                            text-white flex items-center justify-center
-                            text-3xl font-bold">
+          <div className="mt-8 flex flex-col items-center gap-6 sm:flex-row">
+            <div className="flex h-24 w-24 items-center justify-center rounded-full
+                            bg-blue-600 text-3xl font-bold text-white">
               {user?.name?.charAt(0)?.toUpperCase() || 'E'}
             </div>
 
-            <div>
+            <div className="text-center sm:text-left">
               <h3 className="text-2xl font-bold text-slate-800">
-                {user?.name}
+                {user?.name || 'Employee'}
               </h3>
-
-              <p className="text-slate-500 mt-1">
-                {user?.email}
+              <p className="mt-1 break-all text-slate-500">
+                {user?.email || 'No email available'}
               </p>
-
-              <span className="inline-block mt-3 bg-blue-100
-                               text-blue-700 px-3 py-1
-                               rounded-full text-sm">
-                {user?.role}
+              <span className="mt-3 inline-block rounded-full bg-blue-100
+                               px-3 py-1 text-sm text-blue-700">
+                {user?.role || 'Employee'}
               </span>
             </div>
-
           </div>
-        </div>
+        </section>
       )
     }
 
     return null
   }
 
-  // ================= MAIN LAYOUT =================
-
-  return (
-    <div className="min-h-screen bg-slate-100 flex">
-
-      {/* SIDEBAR */}
-
-      <aside className="w-64 bg-slate-900 text-white fixed
-                        left-0 top-0 h-screen hidden md:flex
-                        flex-col z-20">
-
-        <div className="h-20 flex items-center px-6
-                        border-b border-slate-700">
-
-          <div className="w-10 h-10 bg-blue-600 rounded-xl
-                          flex items-center justify-center text-xl">
-            EM
-          </div>
-
-          <div className="ml-3">
-            <h1 className="font-bold text-lg">
-              EmployeeMS
-            </h1>
-
-            <p className="text-xs text-slate-400">
-              Employee Portal
-            </p>
-          </div>
-
+  // Sidebar
+  const sidebar = (
+    <aside className="flex h-full w-64 flex-col bg-slate-900 text-white">
+      <div className="flex h-20 shrink-0 items-center border-b border-slate-700 px-5">
+        <div className="flex h-11 w-11 items-center justify-center rounded-xl
+                        bg-blue-600 text-lg font-bold">
+          EM
         </div>
 
-        <nav className="flex-1 px-4 py-6">
+        <div className="ml-3">
+          <h1 className="text-lg font-bold">EmployeeMS </h1>
+          <p className="text-xs text-slate-400">Employee Portal</p>
+        </div>
 
-          <p className="text-xs uppercase text-slate-500
-                        font-semibold px-3 mb-3">
-            Menu
-          </p>
+        <button
+          onClick={() => setMobileMenuOpen(false)}
+          className="ml-auto rounded-lg p-2 text-slate-300 hover:bg-slate-800 md:hidden"
+          aria-label="Close menu"
+        >
+          
+        </button>
+      </div>
 
-          {menuItems.map(item => (
-            <button
-              key={item.name}
-              onClick={() => setActiveMenu(item.name)}
-              className={`w-full flex items-center gap-3
-                          px-4 py-3 mb-2 rounded-xl text-left
-                          transition ${
-                activeMenu === item.name
-                  ? 'bg-blue-600 text-white shadow-lg'
-                  : 'text-slate-300 hover:bg-slate-800'
-              }`}
-            >
-              <span className="text-lg">
-                {item.icon}
-              </span>
+      <nav className="flex-1 overflow-y-auto px-3 py-6">
+        <p className="mb-3 px-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
+          Menu
+        </p>
 
-              <span className="font-medium">
-                {item.name}
-              </span>
-            </button>
-          ))}
-
-        </nav>
-
-        <div className="p-4 border-t border-slate-700">
+        {menuItems.map(item => (
           <button
-            onClick={logout}
-            className="w-full flex items-center gap-3
-                       px-4 py-3 rounded-xl text-red-400
-                       hover:bg-red-500/10 transition"
+            key={item.name}
+            onClick={() => openMenu(item.name)}
+            className={`mb-2 flex w-full items-center gap-3 rounded-xl px-4 py-3
+                        text-left transition ${
+              activeMenu === item.name
+                ? 'bg-blue-600 text-white shadow-lg'
+                : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+            }`}
           >
-            <span>🚪</span>
-            <span>Logout</span>
+            <span className="text-lg">{item.icon}</span>
+            <span className="font-medium">{item.name}</span>
           </button>
-        </div>
+        ))}
+      </nav>
 
-      </aside>
+      <div className="shrink-0 border-t border-slate-700 p-4">
+        <button
+          onClick={logout}
+          className="flex w-full items-center gap-3 rounded-xl px-4 py-3
+                     text-red-400 transition hover:bg-red-500/10"
+        >
+          <span>🚪</span>
+          <span>Logout</span>
+        </button>
+      </div>
+    </aside>
+  )
 
-      {/* MAIN CONTENT */}
+  // Main layout
+  return (
+    <div className="min-h-screen bg-slate-100">
+      {/* Desktop sidebar */}
+      <div className="fixed inset-y-0 left-0 z-30 hidden md:block">
+        {sidebar}
+      </div>
 
-      <main className="flex-1 md:ml-64">
-
-        {/* TOP NAVBAR */}
-
-        <header className="bg-white border-b border-slate-200
-                           h-20 flex items-center
-                           justify-between px-6 md:px-8">
-
-          <div>
-            <h2 className="text-xl font-bold text-slate-800">
-              {activeMenu}
-            </h2>
-
-            <p className="text-sm text-slate-500">
-              Welcome back, {user?.name} 👋
-            </p>
+      {/* Mobile sidebar */}
+      {mobileMenuOpen && (
+        <div className="fixed inset-0 z-50 md:hidden">
+          <button
+            className="absolute inset-0 h-full w-full bg-black/50"
+            onClick={() => setMobileMenuOpen(false)}
+            aria-label="Close navigation overlay"
+          />
+          <div className="absolute inset-y-0 left-0 shadow-2xl">
+            {sidebar}
           </div>
+        </div>
+      )}
 
-          <div className="flex items-center gap-4">
-
+      {/* Main content */}
+      <main className="min-h-screen md:ml-64">
+        <header className="sticky top-0 z-20 flex h-20 items-center justify-between
+                           border-b border-slate-200 bg-white/95 px-4 backdrop-blur
+                           sm:px-6 lg:px-8">
+          <div className="flex min-w-0 items-center gap-3">
             <button
-              className="relative w-10 h-10 rounded-full
-                         bg-slate-100 hover:bg-slate-200"
-              aria-label="Notifications"
+              onClick={() => setMobileMenuOpen(true)}
+              className="rounded-xl border border-slate-200 p-2 text-slate-700
+                         transition hover:bg-slate-100 md:hidden"
+              aria-label="Open navigation menu"
             >
-              🔔
-
-              <span className="absolute top-1 right-1
-                               w-2.5 h-2.5 bg-red-500
-                               rounded-full border-2 border-white" />
+              ☰
             </button>
 
-            <div className="flex items-center gap-3">
-
-              <div className="w-10 h-10 rounded-full bg-blue-600
-                              text-white flex items-center
-                              justify-center font-bold">
-                {user?.name?.charAt(0)?.toUpperCase() || 'E'}
-              </div>
-
-              <div className="hidden sm:block">
-                <p className="text-sm font-semibold text-slate-800">
-                  {user?.name}
-                </p>
-
-                <p className="text-xs text-slate-500">
-                  Employee
-                </p>
-              </div>
-
+            <div className="min-w-0">
+              <h2 className="truncate text-lg font-bold text-slate-800 sm:text-xl">
+                {activeMenu}
+              </h2>
+              <p className="truncate text-xs text-slate-500 sm:text-sm">
+                Welcome back, {user?.name || 'Employee'} 👋
+              </p>
             </div>
           </div>
 
+          <div className="flex shrink-0 items-center gap-3 sm:gap-4">
+            <div
+              className="hidden h-10 w-10 items-center justify-center rounded-full
+                         bg-blue-100 text-lg sm:flex"
+              title="Employee portal"
+            >
+              🔔
+            </div>
+
+            <div className="flex h-10 w-10 items-center justify-center rounded-full
+                            bg-blue-600 font-bold text-white">
+              {user?.name?.charAt(0)?.toUpperCase() || 'E'}
+            </div>
+
+            <div className="hidden sm:block">
+              <p className="max-w-40 truncate text-sm font-semibold text-slate-800">
+                {user?.name || 'Employee'}
+              </p>
+              <p className="text-xs text-slate-500">
+                {user?.role || 'Employee'}
+              </p>
+            </div>
+          </div>
         </header>
 
-        {/* PAGE CONTENT */}
-
-        <div className="p-6 md:p-8">
+        <div className="p-4 sm:p-6 lg:p-8">
           {renderContent()}
         </div>
 
+        <footer className="px-6 pb-6 text-center text-xs text-slate-400">
+          EmployeeMS · Employee Portal
+        </footer>
       </main>
     </div>
   )
